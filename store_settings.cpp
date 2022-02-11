@@ -8,7 +8,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 
-#include "store_setings.hpp"
+#include "store_settings.hpp"
 
 StoreSettings::StoreSettings(QString sPath) : sPath(sPath)
 {
