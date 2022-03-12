@@ -4,10 +4,10 @@
 #include <string>
 #include <vector>
 #include <memory>
-#include <typeinfo>
+#include <optional>
+#include <any>
 
-#include <QDebug>
-#include <QVariant>
+#include "linker.hpp"
 
 class Serializer
 {
@@ -17,24 +17,43 @@ protected:
 private:
   class PropertyBase
   {
-    const std::string _name;
-  protected:
-    PropertyBase(const std::string & name) : _name(name) {};
-  public:
-    virtual ~PropertyBase() {}
-    std::string name() const { return this->_name; }
-    virtual QVariant read(void) const = 0;
-    virtual void write(QVariant) const = 0;
+    const std::string nameid;
+
+    virtual void copy_from(linker::object_t & map) const = 0;
+    virtual void copy_to(linker::object_t & map)         const = 0;
+
     virtual bool isSerializer(void) const = 0;
-    virtual Serializer * getSerializer(void) const = 0;
-    virtual void setSerializer(Serializer *) const = 0;
-    virtual void toDefValue(void) const = 0;
-    virtual PropertyBase & setDefValue(const QVariant & defValue) = 0;
+
+    virtual std::optional<Serializer *> getSerializer(void) const = 0;
+
+  protected:
+    PropertyBase(const std::string & name) : nameid(name)
+    {
+      // Empty
+    }
+
+  public:
+    virtual ~PropertyBase(void)
+    {
+      // Empty
+    }
+
+    inline std::string name(void) const
+    {
+      return this->nameid;
+    }
+
+    virtual void   toDefValue(void) const = 0;
     template<typename Type>
     PropertyBase & setDefValue(const Type & defValue)
     {
-      return this->setDefValue(QVariant::fromValue<Type>(defValue));
+      return this->m_setDefValue(defValue);
     }
+
+  private:
+    virtual PropertyBase & m_setDefValue(const std::any & defValue) = 0;
+
+    friend class StoreSettings;
   };
 
   template<typename Type>
@@ -45,59 +64,86 @@ private:
     using fWrite = std::function<void(Type)>;
 
   private:
-    Type * ptr;
-    fRead pget;
-    fWrite pset;
-    Type defValue = Type();
+    Type * pPtr;
+    fRead  fGet;
+    fWrite fSet;
+    Type   defValue = Type();
 
-    QVariant read(void) const override
+    Property(Property && prop) = default;
+    Property(const std::string & name, Type * pPtr, fRead fGet = nullptr, fWrite fSet = nullptr)
+      : PropertyBase(name), pPtr(pPtr), fGet(fGet), fSet(fSet)
     {
-      if(this->pget)      return QVariant::fromValue<Type>(this->pget());
-      else if(this->ptr)  return QVariant::fromValue<Type>(*this->ptr);
-      else                return QVariant::fromValue<Type>(Type());
+      // Empty
     }
-    void write(QVariant value) const override
+
+    void copy_from(linker::object_t & map) const override
     {
-      if(this->pset)      this->pset(value.value<Type>());
-      else if(this->ptr)  *this->ptr = value.value<Type>();
+      bool contains = false;
+      if(map.empty() == false)
+      {
+        for(auto & pair : map)
+        {
+          if(pair.first == this->name())
+            contains = true;
+        }
+      }
+
+      if(contains)
+      {
+        this->write(linker::value<Type>(map[this->name()]));
+        return;
+      }
+      this->toDefValue();
     }
-    bool isSerializer(void) const override
+    void copy_to(linker::object_t & map) const override
+    {
+      Type value;
+
+      if(this->fGet)      value = this->fGet();
+      else if(this->pPtr) value = *this->pPtr;
+      else                value = Type();
+
+      map[this->name()] = linker::from(value);
+    }
+    void write(const Type & value) const
+    {
+      if(this->fSet)      this->fSet(value);
+      else if(this->pPtr) *this->pPtr = value;
+    }
+
+    inline bool isSerializer(void) const override
     {
       return std::is_base_of_v<Serializer, Type>;
     }
-    Serializer * getSerializer() const override
+    inline std::optional<Serializer *> getSerializer() const override
     {
-      if(this->isSerializer())
+      if constexpr (std::is_base_of_v<Serializer, Type>)
       {
-        return (Serializer *)((this->ptr && !this->pset) ? this->ptr : new Type());
+        return (this->pPtr && !this->fSet) ? std::optional<Serializer *>(this->pPtr) : std::nullopt;
       }
-      return nullptr;
-    }
-    void setSerializer(Serializer * ptr) const override
-    {
-      if(this->isSerializer() && ptr)
+      else
       {
-        if(this->pset)
-        {
-          this->pset(*(Type *)ptr);
-          delete ptr;
-        }
-        else if(!this->ptr) delete ptr;
+        return std::nullopt;
       }
-    }
-    void toDefValue(void) const override
-    {
-      this->write(QVariant::fromValue<Type>(this->defValue));
-    };
-    PropertyBase & setDefValue(const QVariant & defValue) override
-    {
-      this->defValue = defValue.value<Type>();
-      return *this;
     }
 
-    Property(Property && prop) = default;
-    Property(const std::string & name, Type * ptr, fRead get = nullptr, fWrite set = nullptr)
-      : PropertyBase(name), ptr(ptr), pget(get), pset(set) { }
+    void toDefValue(void) const override
+    {
+      this->write(this->defValue);
+    }
+    PropertyBase & m_setDefValue(const std::any & defValue) override
+    {
+      try
+      {
+        this->defValue = std::any_cast<Type>(defValue);
+      }
+      catch(...)
+      {
+        // Empty
+      }
+
+      return *this;
+    }
 
     template<typename _Tp>
     friend class __gnu_cxx::new_allocator;
@@ -107,66 +153,86 @@ private:
 protected:
   class PropertyManager
   {
-    std::vector<std::shared_ptr<PropertyBase>> props;
-
-    PropertyBase * get(const std::string & name)
-    {
-      for(auto & prop : this->props)
-        if(prop->name() == name) return prop.get();
-      return nullptr;
-    }
-  public:
-    PropertyManager(void) { };
+    std::vector<std::shared_ptr<PropertyBase>> arrpProps;
 
     template<typename Type>
-    PropertyBase * add(const std::string & name, Type * ptr)
+    inline std::shared_ptr<Property<Type>>
+      make_and_move_shared_prop(const char * name,
+                                Type * pPtr,
+                                typename Property<Type>::fRead fGet = nullptr,
+                                typename Property<Type>::fWrite fSet = nullptr)
     {
-      PropertyBase * ret_ptr = this->get(name);
-
-      if(ret_ptr == nullptr)
-      {
-        this->props.push_back(std::make_shared<Property<Type>>(
-                                std::move(*new Property<Type>(name, ptr))));
-        ret_ptr = this->props.back().get();
-      }
-
-      return ret_ptr;
+      return std::make_shared<Property<Type>>(name, pPtr, fGet, fSet);
     }
-    template<class Type>
-    PropertyBase * add(const std::string & name, typename Property<Type>::fRead get,
-                       typename Property<Type>::fWrite set = nullptr)
-    {
-      PropertyBase * ret_ptr = this->get(name);
 
-      if(ret_ptr == nullptr)
+    PropertyBase * get(const std::string & name) const
+    {
+      for(auto & prop : this->arrpProps)
       {
-        this->props.push_back(std::make_shared<Property<Type>>(
-                                std::move(*new Property<Type>(name, nullptr, get, set))));
-        ret_ptr = this->props.back().get();
+        if(prop->name() == name)
+        {
+          return prop.get();
+        }
+      }
+      return nullptr;
+    }
+
+  public:
+    PropertyManager(void)
+    {
+      // Empty
+    }
+
+    template<typename Type>
+    PropertyBase * add(const char * name, Type * pPtr)
+    {
+      PropertyBase * pRet = this->get(name);
+
+      if(pRet == nullptr)
+      {
+        this->arrpProps.push_back(make_and_move_shared_prop<Type>(name, pPtr));
+        pRet = this->arrpProps.back().get();
       }
 
-      return ret_ptr;
+      return pRet;
+    }
+    template<typename Type>
+    PropertyBase * add(const char * name,
+                       typename Property<Type>::fRead fGet,
+                       typename Property<Type>::fWrite fSet = nullptr)
+    {
+      PropertyBase * pRet = this->get(name);
+
+      if(pRet == nullptr)
+      {
+        this->arrpProps.push_back(make_and_move_shared_prop<Type>(name, nullptr, fGet, fSet));
+        pRet = this->arrpProps.back().get();
+      }
+
+      return pRet;
     }
 
     friend class Serializer;
-    friend QVariantMap getVariantMap(Serializer & value);
-    friend void setVariantMap(Serializer & object, const QVariantMap & map);
   };
 
 public:
-  Serializer() { }
-  virtual ~Serializer() { }
+           Serializer(void) { /* Empty */ }
+  virtual ~Serializer(void) { /* Empty */ }
 
-  virtual void configPropertys(PropertyManager &) = 0;
+  virtual void configPropertys(PropertyManager & mng) = 0;
 
-  PropertyBase * getProperty(const char * name)
+  PropertyBase * getProperty(const char * pName)
   {
     PropertyManager mng;
     this->configPropertys(mng);
 
-    return mng.get(name);
+    return mng.get(pName);
   }
+  const decltype(PropertyManager::arrpProps) getPropertysArray(void)
+  {
+    PropertyManager mng;
+    this->configPropertys(mng);
 
-  friend QVariantMap getVariantMap(Serializer & value);
-  friend void setVariantMap(Serializer & object, const QVariantMap & map);
+    return std::move(mng.arrpProps);
+  }
 };

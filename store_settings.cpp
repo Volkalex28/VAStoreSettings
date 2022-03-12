@@ -1,82 +1,91 @@
-#include <QDebug>
-#include <QDir>
-#include <QFile>
-#include <QStandardPaths>
-#include <QVariantList>
-#include <QVariantMap>
-#include <QTextStream>
-#include <QJsonDocument>
-#include <QJsonObject>
+#include <cstdlib>
+#include <fstream>
+
+#include <bitset>
 
 #include "store_settings.hpp"
 
-StoreSettings::StoreSettings(QString sPath) : sPath(sPath)
+StoreSettings::StoreSettings(std::string path) : path(path)
 {
-  QStringList homePath = QStandardPaths::standardLocations(QStandardPaths::HomeLocation);
-  this->dDir = QDir(homePath.first().split(QDir::separator()).last() + "/NibeHelper/");
-
-  if(!this->dDir.exists())
-  {
-    this->dDir.mkdir(".");
-  }
+  // Empty
 }
 
 //--------------------------------------------------------------------------------------------------
-QVariant StoreSettings::getObject(QString key) const
+linker StoreSettings::getObject(const std::string key) const
 {
-  QJsonObject joSett = this->getObject();
+  linkerFile file  = this->getFile();
 
-  if(joSett.contains(key))
+  if(file.isJSONObject())
   {
-    return joSett[key].toVariant();
+    auto sett = file.getJSONObject();
+    return sett[key];
   }
-  return QVariant();
+  return linker();
 }
 
-StoreSettings::State StoreSettings::setObject(QString key, QVariant value) const
+StoreSettings::State StoreSettings::setObject(const std::string key, const linker value) const
 {
-  QVariantMap vmSett = this->getObject().toVariantMap();
+  linkerFile file       = this->getFile();
+  linker::object_t sett = file.getJSONObject();
 
-//  const QMetaObject * metaobject = value.value<>().metaObject();
+  sett[key] = value;
 
-  vmSett[key] = value;
-  QJsonObject joSett = QJsonObject::fromVariantMap(vmSett);
-
-  return this->setObject(joSett);
+  file.setJSONObject(sett);
+  return this->setFile(file);
 }
 
 //--------------------------------------------------------------------------------------------------
-QJsonObject StoreSettings::getObject() const
+linker::array_t StoreSettings::getArray() const
+{
+  linkerFile file  = this->getFile();
+
+  if(file.isJSONObject())
+  {
+    return file.getJSONArray();
+  }
+  return linker::array_t();
+}
+
+StoreSettings::State StoreSettings::setObject(const linker::array_t value) const
+{
+  linkerFile file = linkerFile();
+
+  file.setJSONArray(value);
+  return this->setFile(file);
+}
+
+//--------------------------------------------------------------------------------------------------
+linkerFile StoreSettings::getFile() const
 {
   if(this->checkDir())
   {
-    QFile fJSON(this->dDir.path() + "/" + this->sPath);
-
-    if(fJSON.open(QFile::ReadOnly | QFile::Text))
+    if(std::ifstream json { this->dir.string() + "/" + this->path.string() }; json)
     {
-      QByteArray baJSON = fJSON.readAll();
-      fJSON.close();
-
-      QJsonDocument joSett = QJsonDocument::fromJson(baJSON);
-      if(joSett.isObject())
+      std::string content;
+      while(!json.eof())
       {
-        return joSett.object();
+        std::string local_content;
+        json >> local_content;
+        content += local_content;
       }
+      json.close();
+
+      return linkerFile().fromJSON(content);
     }
   }
-  return QJsonObject();
+
+  return linkerFile();
 }
 
-StoreSettings::State StoreSettings::setObject(QJsonObject joSett) const
+StoreSettings::State StoreSettings::setFile(linkerFile lfSett) const
 {
   if(this->checkDir())
   {
-    QFile fJSON(this->dDir.path() + "/" + this->sPath);
-
-    if(fJSON.open(QFile::WriteOnly | QFile::Text))
+    if(std::ofstream json { this->dir.string() + "/" + this->path.string() }; json)
     {
-      fJSON.write(QJsonDocument(joSett).toJson(QJsonDocument::Indented));
-      fJSON.close();
+      std::string content = lfSett.toJSON(false);
+      json.write(content.c_str(), content.length());
+      json.close();
 
       return State::OK;
     }
@@ -84,80 +93,27 @@ StoreSettings::State StoreSettings::setObject(QJsonObject joSett) const
   return State::ERROR;
 }
 
+bool StoreSettings::mkDir() const
+{
+  std::error_code errorCode;
+  if(!fs::exists(this->dir, errorCode) || errorCode)
+  {
+    fs::create_directory(this->dir);
+  }
+  return !(!fs::exists(this->dir, errorCode) || errorCode);
+}
+
 bool StoreSettings::checkDir() const
 {
-  if(!this->dDir.exists())
+  if(this->dir.empty())
   {
-    this->dDir.mkdir(".");
+    this->dir = getenv("USERPROFILE");
+    if(this->dir.empty())
+    {
+      this->dir = getenv("HOME");
+    }
+    this->dir += "/NibeHelper";
   }
-  return this->dDir.exists();
-}
 
-//--------------------------------------------------------------------------------------------------
-QVariantMap getVariantMap(Serializer & object)
-{
-  QVariantMap map;
-  Serializer::PropertyManager mng;
-  int count = 0;
-
-  object.configPropertys(mng);
-  count = mng.props.size();
-
-  for (int i = 0; i < count; i++) {
-    const std::string name = mng.props[i]->name();
-
-    if(mng.props[i]->isSerializer() == false)
-    {
-      map[name.c_str()] = mng.props[i]->read();
-    }
-    else
-    {
-      auto var = mng.props[i]->read();
-      map[name.c_str()] = getVariantMap(*(Serializer *)var.constData());
-    }
-
-  }
-  return map;
-}
-
-void setVariantMap(Serializer & object, const QVariantMap & map)
-{
-  Serializer::PropertyManager mng;
-  int count = 0;
-
-  object.configPropertys(mng);
-  count = mng.props.size();
-
-  for (int i = 0; i < count; i++)
-  {
-    const Serializer::PropertyBase * prop = mng.props[i].get();
-
-    const char * name = prop->name().c_str();
-
-    if(prop->isSerializer())
-    {
-      bool contains = false;
-      Serializer * new_ptr = prop->getSerializer();
-
-      if(map.empty() == false)
-      {
-        if(map.contains(name))
-        {
-          setVariantMap(*new_ptr, *(QVariantMap *)map[name].constData());
-          contains = true;
-        }
-      }
-      if(contains == false) setVariantMap(*new_ptr, QVariantMap());
-      prop->setSerializer(new_ptr);
-    }
-    else if(map.empty() == false)
-    {
-      if(map.contains(name)) prop->write(map[name]);
-      else                   prop->toDefValue();
-    }
-    else
-    {
-      prop->toDefValue();
-    }
-  }
+  return this->mkDir();
 }
