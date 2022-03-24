@@ -1,35 +1,45 @@
+#include <string_view>
+
+#include <QDebug>
+
+#include "serializer.hpp"
 #include "linker_file.hpp"
 
 void linkerFile::fromJSON(const std::string & input, std::optional<data_t> & data)
 {
   linker::object_t * map = nullptr;
-  linker::array_t *  arr = nullptr;
+  linker::array_t  * arr = nullptr;
 
-  std::size_t braces = 0, subBraces = 0, quotes = 0;
-  std::string symSubBraces = "";
-  bool colon = false;     /*   :   */
-  bool string = false;    /* "..." */
-  bool array = false;     /* [,,,] */
+  std::size_t braces    = 0;
+  std::size_t subBraces = 0;
+  std::string symSubBraces;
+  bool colon  = false;     /*   :   */
+  bool string = false;     /* "..." */
+  bool array  = false;     /* [,,,] */
+  bool quotes = false;     /*   /    */
 
-  std::string str = "";
-  std::string name = "";
+  std::string str;
+  std::string name;
 
   auto getValueFromVector = [](auto & variant)
   {
-    if(variant.index()) return (linker() << std::get<1>(variant));
-    else                return (linker() << std::get<0>(variant));
+    if(variant.index())
+      return (linker() << std::get<1>(variant));
+
+    return (linker() << std::get<0>(variant));
   };
 
-  auto init = [&](void)
+  auto init = [&]()
   {
     if(array) arr = new linker::array_t();
     else      map = new linker::object_t();
   };
   auto save = [&](const linker & lnk)
   {
-    if(array) arr->push_back(lnk); else (*map)[name] = lnk;
+    if(array) arr->push_back(lnk);
+    else      (*map)[name] = lnk;
   };
-  auto retValues = [&](void)
+  auto retValues = [&]()
   {
     if(array && arr)
     {
@@ -43,66 +53,56 @@ void linkerFile::fromJSON(const std::string & input, std::optional<data_t> & dat
     }
   };
 
-  for(const char sym : input)
+  for(auto sym : input)
   {
     if((sym == '\t' || sym == '\n' || sym == '\r' || sym == ' ') && !string) continue;
-    if(!braces)
-    {
-      if(sym == '}' || sym == ']') return;
-      else if(sym != '{' && sym != '[')
-      {
-        if(sym == ' ') continue;
-        return;
-      }
-      else if(sym == '{' || sym == '[')
-      {
-        if(sym == '[')
-          array = true;
 
-        init();
-        braces++;
-      }
-    }
-    else
+    if(braces)
     {
-      if((sym == '\"' || string) && !subBraces)
+      if(sym == '\"' || string)
       {
         if(!string)
         {
           string = true;
-          str = "";
+
+          if(!subBraces) str = "";
+          else           str += sym;
+
           continue;
         }
 
-        if(quotes == 0)
+        if(!quotes)
         {
-          if(sym == '\\')
+          if(sym == '\\' && !subBraces)
           {
-            quotes++;
+            quotes = true;
             continue;
           }
-          else if(sym == '\"')
+          if(sym == '\"')
           {
             string = false;
 
-            if(!colon)
+            if(!subBraces)
             {
-              name = str;
-            }
-            else save(linker() << str);
+              if(!colon && !array)
+              {
+                name = str;
+              }
+              else save(linker::from(str));
 
-            str = "";
-            continue;
+              str = "";
+              continue;
+            }
           }
         }
         else
         {
-          quotes = 0;
+          quotes = false;
         }
 
         str += sym;
       }
-      else if ((colon && (sym == '[' || sym == '{')) || subBraces)
+      else if (((colon || array) && (sym == '[' || sym == '{')) || subBraces)
       {
         if(!subBraces)
         {
@@ -110,9 +110,9 @@ void linkerFile::fromJSON(const std::string & input, std::optional<data_t> & dat
           symSubBraces = "";
         }
 
-        if(symSubBraces == "")
+        if(symSubBraces.empty())
         {
-          symSubBraces = (sym == '[' ? "[]" : "{}");
+          symSubBraces = (sym == '[' ? std::string_view("[]") : std::string_view("{}"));
         }
 
         if(sym == symSubBraces[0]) subBraces++;
@@ -129,7 +129,7 @@ void linkerFile::fromJSON(const std::string & input, std::optional<data_t> & dat
 
         if(!data) continue;
 
-        save(linker() << getValueFromVector(*data));
+        save(linker::from(getValueFromVector(*data)));
       }
       else if(colon || array)
       {
@@ -144,11 +144,11 @@ void linkerFile::fromJSON(const std::string & input, std::optional<data_t> & dat
           if(str.substr(0, 4) == "true" || str.substr(0, 5) == "false")
           {
             bool value = (str.substr(0, 4) == "true");
-            save(linker() << value);
+            save(linker::from(value));
           }
           else if (str.substr(0, 4) == "null")
           {
-            save(linker() << linker::null_t());
+            save(linker::from(linker::null_t()));
           }
           else
           {
@@ -169,34 +169,48 @@ void linkerFile::fromJSON(const std::string & input, std::optional<data_t> & dat
         {
           str += sym;
         }
-        }
-        else if(sym == ':')
-        {
-          str = "";
-          colon = true;
-        }
+      }
+      else if(sym == ':')
+      {
+        str = "";
+        colon = true;
+      }
+    }
+    else
+    {
+      if(sym == '{' || sym == '[')
+      {
+        if(sym == '[')
+          array = true;
+
+        init();
+        braces++;
+
+        continue;
+      }
+      return;
     }
   }
 
   retValues();
 }
 
-bool linkerFile::isJSONArray() const
+auto linkerFile::isJSONArray() const -> bool
 {
   if(this->data) return (std::get_if<1>(&*this->data) != nullptr);
   return false;
 }
-bool linkerFile::isJSONObject() const
+auto linkerFile::isJSONObject() const -> bool
 {
   if(this->data) return (std::get_if<0>(&*this->data) != nullptr);
   return false;
 }
-bool linkerFile::isEmpty() const
+auto linkerFile::isEmpty() const -> bool
 {
   return !this->data;
 }
 
-std::string linkerFile::toJSON(const bool is_short)
+auto linkerFile::toJSON(bool is_short) -> std::string
 {
   switch(this->data->index())
   {
@@ -206,7 +220,7 @@ std::string linkerFile::toJSON(const bool is_short)
   return "";
 }
 
-linkerFile & linkerFile::fromJSON(const std::string & input)
+auto linkerFile::fromJSON(const std::string & input) -> linkerFile &
 {
   this->data = std::nullopt;
   this->fromJSON(input, this->data);
@@ -214,21 +228,21 @@ linkerFile & linkerFile::fromJSON(const std::string & input)
   return *this;
 }
 
-linker::object_t linkerFile::getJSONObject(void) const
+auto linkerFile::getJSONObject() const -> linker::object_t
 {
   if(!this->isEmpty())
   {
     return std::get<0>(*this->data);
   }
-  return linker::object_t();
+  return {};
 }
-linker::array_t linkerFile::getJSONArray(void) const
+auto linkerFile::getJSONArray() const -> linker::array_t
 {
   if(!this->isEmpty())
   {
     return std::get<1>(*this->data);
   }
-  return linker::array_t();
+  return {};
 }
 
 void linkerFile::setJSONObject(const linker::object_t & map)
@@ -239,3 +253,61 @@ void linkerFile::setJSONArray(const linker::array_t & arr)
 {
   this->data = arr;
 }
+
+
+auto linker::operator>>(Serializer & object) const -> Serializer &
+{
+  auto map = this->value<object_t>();
+  auto arrpProps = object.getPropertysArray();
+
+  if (Types::Object != this->m_type) return object;
+
+  for (auto & prop : arrpProps)
+  {
+    /*if(bool contains = false; prop->isSerializer())
+    {
+      if(!map.empty())
+      {
+        for(auto & pair : map)
+        {
+          if(pair.first == prop->name())
+            contains = true;
+        }
+      }
+
+      if(auto serializer = prop->getSerializer(); serializer && contains)
+      {
+        map.at(prop->name()) >> **prop->getSerializer();
+      }
+      else if(serializer)
+      {
+        linker() >> **prop->getSerializer();
+      }
+      else prop->toDefValue();
+    }
+    else*/ prop->copy_from(map);
+  }
+
+  return object;
+}
+
+auto linker::operator<<(const Serializer & object) -> linker &
+{
+  object_t map;
+  auto arrpProps = const_cast<Serializer *>(&object)->getPropertysArray();
+
+  for (auto & prop : arrpProps)
+  {
+    if(prop->isSerializer())
+    {
+      if(auto serializer = prop->getSerializer(); serializer)
+        map[prop->name()] << **serializer;
+    }
+    else prop->copy_to(map);
+  }
+
+  this->m_type = Types::Object;
+  this->m_value = map;
+
+  return *this;
+};

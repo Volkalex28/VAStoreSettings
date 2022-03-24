@@ -9,27 +9,24 @@ class linkerFile
   std::optional<data_t> data = std::nullopt;
 
   template<typename T>
-  std::string toJSON(const T & data, const bool is_short, int tabs)
+  auto toJSON(const T & data, const bool is_short, int tabs) -> std::string
   {
     auto print_tabs = [is_short](const int count) -> std::string
     {
-      if(is_short)
+      if(!is_short)
       {
-        return "";
-      }
-      else
-      {
-        std::string ret = "";
+        std::string ret;
         for(int i = 0; i < count; i++)
           ret += "\t";
         return ret;
       }
+      return "";
     };
-    auto print_enter = [is_short](void) -> std::string
+    auto print_enter = [is_short]() -> std::string
     {
       return is_short ? "" : "\n";
     };
-    [[maybe_unused]] auto print_space = [is_short](void) -> std::string
+    [[maybe_unused]] auto print_space = [is_short]() -> std::string
     {
       return is_short ? "" : " ";
     };
@@ -44,12 +41,14 @@ class linkerFile
       case linker::Types::Number: {
         std::string num = std::to_string(lnk.cast<linker::number_t>());
         int i;
-        for(i = num.length() - 1; i > 0; i--)
+        for(i = (int)num.length() - 1; i > 0; i--)
         {
-            if(num[i] != '0' && num[i] != '.')
-            {
-                break;
-            }
+          if(num[i] != '0')
+          {
+            if(num[i] == '.') i--;
+
+            break;
+          }
         }
         output += num.substr(0, i + 1);
       } break;
@@ -81,8 +80,9 @@ class linkerFile
       return output;
     };
 
-    std::string symSubBraces = "";
-    std::size_t counter = 1, size = data.size();
+    std::string symSubBraces;
+    std::size_t counter = 1;
+    std::size_t size    = data.size();
 
     if constexpr (is_linker_arr_v<T>) symSubBraces = "[]";
     else                              symSubBraces = "{}";
@@ -113,16 +113,16 @@ class linkerFile
   void fromJSON(const std::string & input, std::optional<data_t> & data);
 
 public:
-  bool isJSONArray(void) const;
-  bool isJSONObject(void) const;
-  bool isEmpty(void) const;
+  [[nodiscard]] auto isJSONArray() const -> bool;
+  [[nodiscard]] auto isJSONObject() const -> bool;
+  [[nodiscard]] auto isEmpty() const -> bool;
 
-  std::string toJSON(const bool is_short = false);
+  auto toJSON(bool is_short = false) -> std::string;
 
-  linkerFile & fromJSON(const std::string & input);
+  auto fromJSON(const std::string & input) -> linkerFile &;
 
-  linker::object_t getJSONObject(void) const;
-  linker::array_t getJSONArray(void) const;
+  [[nodiscard]] auto getJSONObject() const -> linker::object_t;
+  [[nodiscard]] auto getJSONArray() const -> linker::array_t;
 
   void setJSONObject(const linker::object_t & map);
   void setJSONArray(const linker::array_t & arr);

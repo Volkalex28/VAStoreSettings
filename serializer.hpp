@@ -17,43 +17,45 @@ protected:
 private:
   class PropertyBase
   {
-    const std::string nameid;
+    std::string nameid;
 
-    virtual void copy_from(linker::object_t & map) const = 0;
-    virtual void copy_to(linker::object_t & map)         const = 0;
+    virtual void copy_from(const linker::object_t & map) const = 0;
+    virtual void copy_to(linker::object_t & map)   const = 0;
 
-    virtual bool isSerializer(void) const = 0;
-
-    virtual std::optional<Serializer *> getSerializer(void) const = 0;
+    [[nodiscard]] virtual auto isSerializer() const -> bool = 0;
+    [[nodiscard]] virtual auto getSerializer() const -> std::optional<Serializer *> = 0;
 
   protected:
-    PropertyBase(const std::string & name) : nameid(name)
+    PropertyBase(std::string name) : nameid(std::move(name))
     {
       // Empty
     }
 
   public:
-    virtual ~PropertyBase(void)
-    {
-      // Empty
-    }
+    PropertyBase(PropertyBase &&) noexcept = default;
+    PropertyBase(const PropertyBase &) = default;
+    auto operator=(PropertyBase && other) noexcept -> PropertyBase & = default;
+    auto operator=(const PropertyBase &) -> PropertyBase & = default;
+    virtual ~PropertyBase() = default;
 
-    inline std::string name(void) const
+    [[nodiscard]] inline auto name() const -> std::string
     {
       return this->nameid;
     }
 
-    virtual void   toDefValue(void) const = 0;
+    virtual void toDefValue() const = 0;
     template<typename Type>
-    PropertyBase & setDefValue(const Type & defValue)
+    auto setDefValue(const Type & defValue) -> PropertyBase &
     {
       return this->m_setDefValue(defValue);
     }
 
   private:
-    virtual PropertyBase & m_setDefValue(const std::any & defValue) = 0;
+    virtual auto m_setDefValue(const std::any & defValue) -> PropertyBase & = 0;
 
     friend class StoreSettings;
+    friend auto linker::operator>>(Serializer & object) const -> Serializer &;
+    friend auto linker::operator<<(const Serializer & object) -> linker &;
   };
 
   template<typename Type>
@@ -69,17 +71,21 @@ private:
     fWrite fSet;
     Type   defValue = Type();
 
-    Property(Property && prop) = default;
-    Property(const std::string & name, Type * pPtr, fRead fGet = nullptr, fWrite fSet = nullptr)
+    Property(Property &&) noexcept = default;
+    Property(const Property &) = default;
+    auto operator=(Property &&) noexcept -> Property & = default;
+    auto operator=(const Property &) -> Property & = default;
+    Property(std::string && name, Type * pPtr, fRead fGet = nullptr, fWrite fSet = nullptr)
       : PropertyBase(name), pPtr(pPtr), fGet(fGet), fSet(fSet)
     {
       // Empty
     }
+    ~Property() override = default;
 
-    void copy_from(linker::object_t & map) const override
+    void copy_from(const linker::object_t & map) const override
     {
       bool contains = false;
-      if(map.empty() == false)
+      if(!map.empty())
       {
         for(auto & pair : map)
         {
@@ -90,7 +96,7 @@ private:
 
       if(contains)
       {
-        this->write(linker::value<Type>(map[this->name()]));
+        this->write(linker::value<Type>(map.at(this->name())));
         return;
       }
       this->toDefValue();
@@ -111,11 +117,11 @@ private:
       else if(this->pPtr) *this->pPtr = value;
     }
 
-    inline bool isSerializer(void) const override
+    [[nodiscard]] inline auto isSerializer() const -> bool override
     {
       return std::is_base_of_v<Serializer, Type>;
     }
-    inline std::optional<Serializer *> getSerializer() const override
+    [[nodiscard]] inline auto getSerializer() const -> std::optional<Serializer *> override
     {
       if constexpr (std::is_base_of_v<Serializer, Type>)
       {
@@ -127,11 +133,11 @@ private:
       }
     }
 
-    void toDefValue(void) const override
+    void toDefValue() const override
     {
       this->write(this->defValue);
     }
-    PropertyBase & m_setDefValue(const std::any & defValue) override
+    auto m_setDefValue(const std::any & defValue) -> PropertyBase & override
     {
       try
       {
@@ -145,8 +151,6 @@ private:
       return *this;
     }
 
-    template<typename _Tp>
-    friend class __gnu_cxx::new_allocator;
     friend class PropertyManager;
   };
 
@@ -156,16 +160,15 @@ protected:
     std::vector<std::shared_ptr<PropertyBase>> arrpProps;
 
     template<typename Type>
-    inline std::shared_ptr<Property<Type>>
-      make_and_move_shared_prop(const char * name,
-                                Type * pPtr,
-                                typename Property<Type>::fRead fGet = nullptr,
-                                typename Property<Type>::fWrite fSet = nullptr)
+    inline auto make_and_move_shared_prop(const char * name, Type * pPtr,
+                                          typename Property<Type>::fRead fGet = nullptr,
+                                          typename Property<Type>::fWrite fSet = nullptr)
+      ->std::shared_ptr<PropertyBase>
     {
-      return std::make_shared<Property<Type>>(name, pPtr, fGet, fSet);
+      return std::shared_ptr<PropertyBase>(static_cast<PropertyBase *>(new Property<Type>(name, pPtr, fGet, fSet)));
     }
 
-    PropertyBase * get(const std::string & name) const
+    [[nodiscard]] auto get(const std::string & name) const -> PropertyBase *
     {
       for(auto & prop : this->arrpProps)
       {
@@ -178,13 +181,10 @@ protected:
     }
 
   public:
-    PropertyManager(void)
-    {
-      // Empty
-    }
+    PropertyManager() = default;
 
     template<typename Type>
-    PropertyBase * add(const char * name, Type * pPtr)
+    auto add(const char * name, Type * pPtr) -> PropertyBase *
     {
       PropertyBase * pRet = this->get(name);
 
@@ -197,9 +197,9 @@ protected:
       return pRet;
     }
     template<typename Type>
-    PropertyBase * add(const char * name,
-                       typename Property<Type>::fRead fGet,
-                       typename Property<Type>::fWrite fSet = nullptr)
+    auto add(const char * name,
+             typename Property<Type>::fRead fGet,
+             typename Property<Type>::fWrite fSet = nullptr) -> PropertyBase *
     {
       PropertyBase * pRet = this->get(name);
 
@@ -216,19 +216,23 @@ protected:
   };
 
 public:
-           Serializer(void) { /* Empty */ }
-  virtual ~Serializer(void) { /* Empty */ }
+  Serializer() = default;
+  Serializer(Serializer &&) noexcept = default;
+  Serializer(const Serializer &) = default;
+  auto operator=(Serializer &&) noexcept -> Serializer & = default;
+  auto operator=(const Serializer &) -> Serializer & = default;
+  virtual ~Serializer() = default;
 
   virtual void configPropertys(PropertyManager & mng) = 0;
 
-  PropertyBase * getProperty(const char * pName)
+  auto getProperty(const char * pName) -> PropertyBase *
   {
     PropertyManager mng;
     this->configPropertys(mng);
 
     return mng.get(pName);
   }
-  const decltype(PropertyManager::arrpProps) getPropertysArray(void)
+  auto getPropertysArray() -> std::vector<std::shared_ptr<PropertyBase>>
   {
     PropertyManager mng;
     this->configPropertys(mng);
