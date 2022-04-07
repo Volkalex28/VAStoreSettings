@@ -1,7 +1,6 @@
 #pragma once
 
 #include <any>
-#include <functional>
 #include <cstring>
 #include <optional>
 
@@ -82,7 +81,7 @@ public:
     }
     else if constexpr (is_vector_v<T> || is_list_v<T>     || is_forward_list_v<T>
                     || is_set_v<T>    || is_multiset_v<T> || is_unordered_set_v<T>
-                    || IS_array_v<T>  || is_valarray_v<T> || is_unordered_multiset_v<T>
+                    || is_array_v<T>  || is_valarray_v<T> || is_unordered_multiset_v<T>
                     || is_map_v<T>    || is_multimap_v<T> || is_unordered_multimap_v<T>
                     || is_deque_v<T>  || is_unordered_map_v<T>)
     {
@@ -172,7 +171,7 @@ public:
     }
     else if(std::is_base_of_v<Serializer, T>)
     {
-      this->operator<<(*(Serializer*)&value);
+      this->operator<<(*(Serializer *)&value);
     }
 
     return *this;
@@ -197,148 +196,145 @@ public:
   {
     try
     {
-      constexpr Types m_type = linker::get_type<T>();
-//      if (m_type != this->m_type) return retVal;
+    constexpr Types m_type = linker::get_type<T>();
 
-      if constexpr      (m_type == Types::Bool)   retVal = this->cast<bool_t>();
-      else if constexpr (m_type == Types::Number) retVal = (T)this->cast<number_t>();
-      else if constexpr (m_type == Types::String)
+    if constexpr      (m_type == Types::Bool)   retVal = this->cast<bool_t>();
+    else if constexpr (m_type == Types::Number) retVal = (T)this->cast<number_t>();
+    else if constexpr (m_type == Types::String)
+    {
+      const auto string = this->cast<string_t>();
+
+      if constexpr (std::is_array_v<T>)
       {
-        const auto string = this->cast<string_t>();
+        strncpy(retVal, string.c_str(), std::extent_v<T>);
+        retVal[std::extent_v<T> - 1] = '\0';
+      }
+      else
+      {
+        retVal = this->cast<string_t>().c_str();
+      }
+    }
+    else if constexpr (std::is_array_v<T>)
+    {
+      const array_t arr { this->cast<array_t>() };
 
-        if constexpr (std::is_array_v<T>)
+      for(std::size_t i = 0; i < std::extent_v<T> && i < arr.size(); i++)
+        arr[i] >> retVal[i];
+    }
+    else if constexpr (is_array_v<T>)
+    {
+      const array_t arr { this->cast<array_t>() };
+      T ret;
+
+      for(std::size_t i = 0; i < ret.size() && i < arr.size(); i++)
+        arr[i] >> ret[i];
+
+      std::swap(retVal, ret);
+    }
+    else if constexpr (is_vector_v<T>   || is_list_v<T> || is_forward_list_v<T>
+                    || is_valarray_v<T> || is_deque_v<T>)
+    {
+      const array_t arr { this->cast<array_t>() };
+      T ret(arr.size());
+
+      auto retIt = std::begin(ret);
+      for(auto it = std::cbegin(arr); it != std::cend(arr); it++, retIt++)
+      {
+        *it >> *retIt;
+      }
+
+      std::swap(retVal, ret);
+    }
+    else if constexpr (is_linker_obj_v<std::remove_const_t<T>>)
+    {
+      retVal = this->cast<linker::object_t>();
+    }
+    else if constexpr (is_set_v<T> || is_multiset_v<T> || is_unordered_set_v<T>
+                    || is_unordered_multiset_v<T>      || is_multimap_v<T>
+                    || is_map_v<T> || is_unordered_multimap_v<T>
+                    || is_unordered_map_v<T>)
+    {
+      T ret;
+      const array_t arr { this->cast<array_t>() };
+
+      for(auto it = std::cbegin(arr); it != std::cend(arr); it++)
+      {
+        if constexpr (is_map_v<T> || is_multimap_v<T> || is_unordered_map_v<T>
+                    || is_unordered_multimap_v<T>)
         {
-          strncpy(retVal, string.c_str(), std::extent_v<T>);
-          retVal[std::extent_v<T> - 1] = '\0';
+          using first  = std::remove_const_t<typename T::key_type>;
+          using second = std::remove_const_t<typename T::mapped_type>;
+
+          ret.insert(it->value<std::pair<first, second>>());
         }
         else
         {
-          retVal = this->cast<string_t>().c_str();
+          ret.insert(it->value<typename T::value_type>());
         }
       }
-      else if constexpr (std::is_array_v<T>)
+
+      std::swap(retVal, ret);
+    }
+    else if constexpr (is_pair_v<T>)
+    {
+      object_t obj { this->cast<object_t>() };
+
+      using first  = std::remove_const_t<typename T::first_type>;
+      using second = std::remove_const_t<typename T::second_type>;
+
+      retVal = { std::move(obj["f"].value<first>()), std::move(obj["s"].value<second>()) };
+    }
+    else if constexpr (is_bitset_v<T>)
+    {
+      const array_t arr { this->cast<array_t>() };
+
+      for(std::size_t i = 0; i < arr.size() && i < retVal.size(); i++)
+        retVal[i] = arr[i].value<bool>();
+    }
+    else if constexpr (is_queue_v<T> || is_priority_queue_v<T> || is_stack_v<T>)
+    {
+      T ret;
+      const array_t arr { this->cast<array_t>() };
+
+      for(auto & cell : arr)
+        ret.push(cell.value<typename T::value_type>());
+
+      retVal.swap(ret);
+    }
+    else if constexpr (is_complex_v<T>)
+    {
+      object_t obj { this->cast<object_t>() };
+
+      retVal->real(obj["r"].value<number_t>());
+      retVal->imag(obj["i"].value<number_t>());
+    }
+    else if constexpr (is_tuple_v<T>)
+    {
+      object_t obj { this->cast<object_t>() };
+      [&]<std::size_t ... I>(std::index_sequence<I ...>)
       {
-        const array_t arr { this->cast<array_t>() };
-
-        for(std::size_t i = 0; i < std::extent_v<T> && i < arr.size(); i++)
-          arr[i] >> retVal[i];
-      }
-      else if constexpr (IS_array_v<T>)
+          [](auto && ...) { } (obj["t" + std::to_string(I)] >> std::get<I>(retVal)...);
+      }(std::make_index_sequence<std::tuple_size_v<T>>());
+    }
+    else if constexpr (is_variant_v<T>)
+    {
+      [&]<std::size_t ... I>(std::index_sequence<I ...>)
       {
-        const array_t arr { this->cast<array_t>() };
-        T ret;
-
-        for(std::size_t i = 0; i < ret.size() && i < arr.size(); i++)
-          arr[i] >> ret[i];
-
-        std::swap(retVal, ret);
-      }
-      else if constexpr (is_vector_v<T>   || is_list_v<T> || is_forward_list_v<T>
-                      || is_valarray_v<T> || is_deque_v<T>)
-      {
-        const array_t arr { this->cast<array_t>() };
-        T ret(arr.size());
-
-        auto retIt = std::begin(ret);
-        for(auto it = std::cbegin(arr); it != std::cend(arr); it++, retIt++)
-        {
-          *it >> *retIt;
-        }
-
-        std::swap(retVal, ret);
-      }
-      else if constexpr (is_linker_obj_v<std::remove_const_t<T>>)
-      {
-        retVal = this->cast<linker::object_t>();
-      }
-      else if constexpr (is_set_v<T> || is_multiset_v<T> || is_unordered_set_v<T>
-                      || is_unordered_multiset_v<T>      || is_multimap_v<T>
-                      || is_map_v<T> || is_unordered_multimap_v<T>
-                      || is_unordered_map_v<T>)
-      {
-        T ret;
-        const array_t arr { this->cast<array_t>() };
-
-        for(auto it = std::cbegin(arr); it != std::cend(arr); it++)
-        {
-          if constexpr (is_map_v<T> || is_multimap_v<T> || is_unordered_map_v<T>
-                      || is_unordered_multimap_v<T>)
-          {
-            using first  = std::remove_const_t<typename T::key_type>;
-            using second = std::remove_const_t<typename T::mapped_type>;
-
-            ret.insert(it->value<std::pair<first, second>>());
-          }
-          else
-          {
-            ret.insert(it->value<typename T::value_type>());
-          }
-        }
-
-        std::swap(retVal, ret);
-      }
-      else if constexpr (is_pair_v<T>)
-      {
-        object_t obj { this->cast<object_t>() };
-
-        using first  = std::remove_const_t<typename T::first_type>;
-        using second = std::remove_const_t<typename T::second_type>;
-
-        retVal.first  = std::move(obj["f"].value<first>());
-        retVal.second = std::move(obj["s"].value<second>());
-      }
-      else if constexpr (is_bitset_v<T>)
-      {
-        const array_t arr { this->cast<array_t>() };
-
-        for(std::size_t i = 0; i < arr.size() && i < retVal.size(); i++)
-          retVal[i] = arr[i].value<bool>();
-      }
-      else if constexpr (is_queue_v<T> || is_priority_queue_v<T> || is_stack_v<T>)
-      {
-        T ret;
-        const array_t arr { this->cast<array_t>() };
-
-        for(auto & cell : arr)
-          ret.push(cell.value<typename T::value_type>());
-
-        retVal.swap(ret);
-      }
-      else if constexpr (is_complex_v<T>)
-      {
-        object_t obj { this->cast<object_t>() };
-
-        retVal->real(obj["r"].value<number_t>());
-        retVal->imag(obj["i"].value<number_t>());
-      }
-      else if constexpr (is_tuple_v<T>)
-      {
-        object_t obj { this->cast<object_t>() };
-        [&]<std::size_t ... I>(std::index_sequence<I ...>)
-        {
-            [](auto && ...) { } (obj["t" + std::to_string(I)] >> std::get<I>(retVal)...);
-        }(std::make_index_sequence<std::tuple_size_v<T>>());
-      }
-      else if constexpr (is_variant_v<T>)
-      {
-        [&]<std::size_t ... I>(std::index_sequence<I ...>)
-        {
-            auto obj = this->cast<object_t>();
-            [](auto && ...){}((I == obj["i"].value<std::size_t>() ? [&]()
-            {
-                retVal = obj["v"].value<std::variant_alternative_t<I, T>>();
-                return std::nullopt;
-            } () : std::nullopt)...);
-        }(std::make_index_sequence<std::variant_size_v<T>>());
-      }
-      else if constexpr (is_linker_v<T>)
-      {
-        retVal = this->cast<linker>();
-      }
-      else if(std::is_base_of_v<Serializer, T>)
-      {
-        this->operator>>(*(Serializer*)&retVal);
-      }
+        auto obj = this->cast<object_t>();
+        [](auto && ...){}((I == obj["i"].value<std::size_t>() ? [&] {
+          retVal = obj["v"].value<std::variant_alternative_t<I, T>>();
+          return std::nullopt;
+        }() : std::nullopt)...);
+      }(std::make_index_sequence<std::variant_size_v<T>>());
+    }
+    else if constexpr (is_linker_v<T>)
+    {
+      retVal = this->cast<linker>();
+    }
+    else if(std::is_base_of_v<Serializer, T>)
+    {
+      this->operator>>(*(Serializer*)&retVal);
+    }
     }
     catch(...) { }
 
@@ -373,7 +369,7 @@ private:
     else if constexpr (is_linker_obj_v<T> || is_pair_v<T> || is_complex_v<T>
                     || is_tuple_v<T> || is_variant_v<T> || std::is_base_of_v<Serializer, T>)
         return Types::Object;
-    else if constexpr (is_linker_arr_v<T> || std::is_array_v<T> || IS_array_v<T> || is_bitset_v<T>
+    else if constexpr (is_linker_arr_v<T> || std::is_array_v<T> || is_array_v<T> || is_bitset_v<T>
                     || is_vector_v<T> || is_list_v<T> || is_forward_list_v<T> || is_set_v<T>
                     || is_multiset_v<T> || is_unordered_set_v<T> || is_unordered_multiset_v<T>
                     || is_valarray_v<T> || is_map_v<T> || is_multimap_v<T> || is_unordered_map_v<T>

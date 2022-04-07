@@ -36,7 +36,7 @@ template<typename T>        constexpr bool is_vector_v = is_vector<T>::value;
 template<typename T>        struct is_array : std::false_type {};
 template<typename T, std::size_t Nb>
                             struct is_array<std::array<T, Nb>> : std::true_type {};
-template<typename T>        constexpr bool IS_array_v = is_array<T>::value;
+template<typename T>        constexpr bool is_array_v = is_array<T>::value;
 
 // bitset
 template<typename T>        struct is_bitset : std::false_type {};

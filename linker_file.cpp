@@ -1,7 +1,5 @@
 #include <string_view>
 
-#include <QDebug>
-
 #include "serializer.hpp"
 #include "linker_file.hpp"
 
@@ -257,36 +255,11 @@ void linkerFile::setJSONArray(const linker::array_t & arr)
 
 auto linker::operator>>(Serializer & object) const -> Serializer &
 {
-  auto map = this->value<object_t>();
-  auto arrpProps = object.getPropertysArray();
+  if (Types::Object != this->m_type)
+    return object;
 
-  if (Types::Object != this->m_type) return object;
-
-  for (auto & prop : arrpProps)
-  {
-    /*if(bool contains = false; prop->isSerializer())
-    {
-      if(!map.empty())
-      {
-        for(auto & pair : map)
-        {
-          if(pair.first == prop->name())
-            contains = true;
-        }
-      }
-
-      if(auto serializer = prop->getSerializer(); serializer && contains)
-      {
-        map.at(prop->name()) >> **prop->getSerializer();
-      }
-      else if(serializer)
-      {
-        linker() >> **prop->getSerializer();
-      }
-      else prop->toDefValue();
-    }
-    else*/ prop->copy_from(map);
-  }
+  for (auto arrpProps = object.getPropertysArray(); auto & prop : arrpProps)
+    prop->copy_from(this->value<object_t>());
 
   return object;
 }
@@ -294,17 +267,9 @@ auto linker::operator>>(Serializer & object) const -> Serializer &
 auto linker::operator<<(const Serializer & object) -> linker &
 {
   object_t map;
-  auto arrpProps = const_cast<Serializer *>(&object)->getPropertysArray();
 
-  for (auto & prop : arrpProps)
-  {
-    if(prop->isSerializer())
-    {
-      if(auto serializer = prop->getSerializer(); serializer)
-        map[prop->name()] << **serializer;
-    }
-    else prop->copy_to(map);
-  }
+  for(auto arrpProps = const_cast<Serializer *>(&object)->getPropertysArray(); auto & prop : arrpProps)
+    prop->copy_to(map);
 
   this->m_type = Types::Object;
   this->m_value = map;
