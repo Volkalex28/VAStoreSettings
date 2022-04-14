@@ -27,20 +27,53 @@ public:
 
   StoreSettings(const std::string & path, DirectoryPath = DirectoryPath::User);
   StoreSettings(const std::string & path, const fs::path & dir);
+  ~StoreSettings() = default;
+  StoreSettings(StoreSettings &&) noexcept = default;
+  StoreSettings(const StoreSettings &)     = default;
+  auto operator=(StoreSettings &&) noexcept -> StoreSettings & = default;
+  auto operator=(const StoreSettings &)     -> StoreSettings & = default;
 
-  [[nodiscard]] auto dir() const -> fs::directory_entry;
+  [[nodiscard]]        auto dir()  const -> fs::directory_entry;
+  inline auto name() const -> std::string
+  {
+    return this->mPath.string();
+  }
+  void setName(const std::string & name);
 
 protected:
   template <typename Type>
   class Setting
   {
-    StoreSettings * const pStore;
-    std::string           key;
+    StoreSettings * pStore;
+    std::string     m_key;
 
   public:
-    Setting(StoreSettings * const pStore, std::string key) : pStore(pStore), key(std::move(key))
+    Setting(StoreSettings * const pStore, std::string key) : pStore(pStore), m_key(std::move(key))
     {
       // Empty
+    }
+    ~Setting() = default;
+    Setting(Setting &&) noexcept = default;
+    Setting(const Setting &)     = default;
+    auto operator=(Setting && other) noexcept -> Setting &
+    {
+      if(&other == this)
+        return *this;
+
+      this->pStore = other.pStore;
+      this->m_key  = std::move(other.m_key);
+
+      return *this;
+    }
+    auto operator=(const Setting & other)     -> Setting &
+    {
+      if(&other == this)
+        return *this;
+
+      this->pStore = other.pStore;
+      this->m_key  = other.m_key;
+
+      return *this;
     }
 
     auto get() const -> Type
@@ -49,21 +82,20 @@ protected:
       {
         Type object;
 
-        this->pStore->getObject(this->key) >> *static_cast<Serializer *>(&object);
+        this->pStore->getObject(this->m_key) >> *static_cast<Serializer *>(&object);
         return object;
       }
-      else return linker::value<Type>(this->pStore->getObject(this->key));
+      else return linker::value<Type>(this->pStore->getObject(this->m_key));
     }
     auto set(const Type value) const -> StoreSettings::State
     {
-      return this->pStore->setObject(this->key, linker::from(value));
+      return this->pStore->setObject(this->m_key, linker::from(value));
     }
   };
 
 private:
   fs::path                     mPath;
   std::optional<DirectoryPath> mDirType;
-  fs::path                     mSubDir;
   mutable fs::directory_entry  mDir;
 
   [[nodiscard]] auto getObject(const std::string & key)               const -> linker;

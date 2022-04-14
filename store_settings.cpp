@@ -112,10 +112,6 @@ auto StoreSettings::getFile() const -> linkerFile
         std::array<char, 2048> buf = {};
         json.getline(buf.data(), buf.size());
         content += buf.data();
-//        content += '\n';
-//        std::string local_content;
-//        json >> local_content;
-//        content += local_content;
       }
       json.close();
 
@@ -220,7 +216,6 @@ auto StoreSettings::dir() const -> fs::directory_entry
     {
       dirPath += "/";
     }
-    dirPath += "NibeHelper/";
 
     std::size_t index = this->mPath.string().find_last_of("\\/");
     if(index != std::string::npos)
@@ -230,4 +225,9 @@ auto StoreSettings::dir() const -> fs::directory_entry
   }
 
   return fs::directory_entry(dirPath);
+}
+
+void StoreSettings::setName(const std::string & name)
+{
+  this->mPath = setup_path(name);
 }

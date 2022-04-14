@@ -313,7 +313,7 @@ public:
       object_t obj { this->cast<object_t>() };
       [&]<std::size_t ... I>(std::index_sequence<I ...>)
       {
-          [](auto && ...) { } (obj["t" + std::to_string(I)] >> std::get<I>(retVal)...);
+        [](auto && ...){}(obj["t" + std::to_string(I)] >> std::get<I>(retVal)...);
       }(std::make_index_sequence<std::tuple_size_v<T>>());
     }
     else if constexpr (is_variant_v<T>)
@@ -321,7 +321,8 @@ public:
       [&]<std::size_t ... I>(std::index_sequence<I ...>)
       {
         auto obj = this->cast<object_t>();
-        [](auto && ...){}((I == obj["i"].value<std::size_t>() ? [&] {
+        [](auto && ...){}((I == obj["i"].value<std::size_t>() ? [&]
+        {
           retVal = obj["v"].value<std::variant_alternative_t<I, T>>();
           return std::nullopt;
         }() : std::nullopt)...);
