@@ -5,21 +5,25 @@
 
 void linkerFile::fromJSON(const std::string & input, std::optional<data_t> & data)
 {
-  linker::object_t * map = nullptr;
-  linker::array_t  * arr = nullptr;
+  data_t rdata;
 
   std::size_t braces    = 0;
   std::size_t subBraces = 0;
   std::string symSubBraces;
   bool colon  = false;     /*   :   */
   bool string = false;     /* "..." */
-  bool array  = false;     /* [,,,] */
+//  bool array  = false;     /* [,,,] */
   bool quotes = false;     /*   /    */
 
   std::string str;
   std::string name;
 
-  auto getValueFromVector = [](auto & variant)
+  auto isArray = [&rdata]
+  {
+    return rdata.index() == 1;
+  };
+
+  auto getValueFromVariant = [](auto & variant)
   {
     if(variant.index())
       return (linker() << std::get<1>(variant));
@@ -27,27 +31,25 @@ void linkerFile::fromJSON(const std::string & input, std::optional<data_t> & dat
     return (linker() << std::get<0>(variant));
   };
 
-  auto init = [&]()
+  auto init = [&](bool isArray)
   {
-    if(array) arr = new linker::array_t();
-    else      map = new linker::object_t();
+    if(isArray) rdata = linker::array_t();
+    else        rdata = linker::object_t();
   };
   auto save = [&](const linker & lnk)
   {
-    if(array) arr->push_back(lnk);
-    else      (*map)[name] = lnk;
+    if(isArray()) std::get<1>(rdata).push_back(lnk);
+    else          std::get<0>(rdata)[name] = lnk;
   };
   auto retValues = [&]()
   {
-    if(array && arr)
+    if(isArray())
     {
-      data = *arr;
-      delete arr;
+      data = std::get<1>(rdata);
     }
-    else if(map)
+    else
     {
-      data = *map;
-      delete map;
+      data = std::get<0>(rdata);
     }
   };
 
@@ -82,7 +84,7 @@ void linkerFile::fromJSON(const std::string & input, std::optional<data_t> & dat
 
             if(!subBraces)
             {
-              if(!colon && !array)
+              if(!colon && !isArray())
               {
                 name = str;
               }
@@ -100,7 +102,7 @@ void linkerFile::fromJSON(const std::string & input, std::optional<data_t> & dat
 
         str += sym;
       }
-      else if (((colon || array) && (sym == '[' || sym == '{')) || subBraces)
+      else if (((colon || isArray()) && (sym == '[' || sym == '{')) || subBraces)
       {
         if(!subBraces)
         {
@@ -127,11 +129,11 @@ void linkerFile::fromJSON(const std::string & input, std::optional<data_t> & dat
 
         if(!data) continue;
 
-        save(linker::from(getValueFromVector(*data)));
+        save(linker::from(getValueFromVariant(*data)));
       }
-      else if(colon || array)
+      else if(colon || isArray())
       {
-        if(!subBraces && ((!array && sym == '}') || (array && sym == ']'))) braces--;
+        if(!subBraces && ((!isArray() && sym == '}') || (isArray() && sym == ']'))) braces--;
 
         if(sym == ',' || !braces)
         {
@@ -178,10 +180,7 @@ void linkerFile::fromJSON(const std::string & input, std::optional<data_t> & dat
     {
       if(sym == '{' || sym == '[')
       {
-        if(sym == '[')
-          array = true;
-
-        init();
+        init(sym == '[');
         braces++;
 
         continue;

@@ -12,6 +12,7 @@ class linkerFile;
 
 class StoreSettings
 {
+  bool deleted = false;
 public:
   enum class State : uint8_t
   {
@@ -33,7 +34,7 @@ public:
   auto operator=(StoreSettings &&) noexcept -> StoreSettings & = default;
   auto operator=(const StoreSettings &)     -> StoreSettings & = default;
 
-  [[nodiscard]]        auto dir()  const -> fs::directory_entry;
+  [[nodiscard]] auto dir()  const -> fs::directory_entry;
   inline auto name() const -> std::string
   {
     return this->mPath.string();
@@ -52,29 +53,15 @@ protected:
     {
       // Empty
     }
-    ~Setting() = default;
+    ~Setting()
+    {
+      pStore = nullptr;
+    }
+
     Setting(Setting &&) noexcept = default;
-    Setting(const Setting &)     = default;
-    auto operator=(Setting && other) noexcept -> Setting &
-    {
-      if(&other == this)
-        return *this;
-
-      this->pStore = other.pStore;
-      this->m_key  = std::move(other.m_key);
-
-      return *this;
-    }
-    auto operator=(const Setting & other)     -> Setting &
-    {
-      if(&other == this)
-        return *this;
-
-      this->pStore = other.pStore;
-      this->m_key  = other.m_key;
-
-      return *this;
-    }
+    Setting(const Setting &) = default;
+    auto operator=(Setting && other) noexcept -> Setting & = default;
+    auto operator=(const Setting & other)     -> Setting & = default;
 
     auto get() const -> Type
     {
